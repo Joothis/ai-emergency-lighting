@@ -1,0 +1,18 @@
+{
+  "rulebook": [
+    {
+      "type": "note",
+      "text": "All emergency lighting must be connected to unswitched power.",
+      "source_sheet": "E0.1"
+    },
+    {
+      "type": "table_row",
+      "symbol": "A1E",
+      "description": "Exit/Emergency Combo Unit",
+      "mount": "Ceiling",
+      "voltage": "277V",
+      "lumens": "1500lm",
+      "source_sheet": "Lighting Schedule - E3"
+    }
+  ]
+}

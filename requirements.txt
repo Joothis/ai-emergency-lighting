@@ -1,0 +1,9 @@
+PyMuPDF
+Pillow
+fastapi
+uvicorn
+celery
+redis
+pydantic
+opencv-python
+easyocr
