@@ -1,71 +1,124 @@
 {
-	"info": {
-		"_postman_id": "<a-unique-id>",
-		"name": "Emergency Lighting Detection",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"item": [
-		{
-			"name": "Upload Blueprint",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "formdata",
-					"formdata": [
-						{
-							"key": "file",
-							"type": "file",
-							"src": "/path/to/your/blueprint.pdf"
-						}
-					]
-				},
-				"url": {
-					"raw": "http://127.0.0.1:8000/blueprints/upload",
-					"protocol": "http",
-					"host": [
-						"127",
-						"0",
-						"0",
-						"1"
-					],
-					"port": "8000",
-					"path": [
-						"blueprints",
-						"upload"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "Get Result",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "http://127.0.0.1:8000/blueprints/result?task_id=<your_task_id>",
-					"protocol": "http",
-					"host": [
-						"127",
-						"0",
-						"0",
-						"1"
-					],
-					"port": "8000",
-					"path": [
-						"blueprints",
-						"result"
-					],
-					"query": [
-						{
-							"key": "task_id",
-							"value": "<your_task_id>"
-						}
-					]
-				}
-			},
-			"response": []
-		}
-	]
+    "info": {
+        "_postman_id": "emergency-lighting-competition",
+        "name": "Emergency Lighting Detection - Competition",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "https://your-app.onrender.com",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "Upload Blueprint",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": "file",
+                            "type": "file",
+                            "src": "/path/to/blueprint.pdf"
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": "{{base_url}}/blueprints/upload",
+                    "host": ["{{base_url}}"],
+                    "path": ["blueprints", "upload"]
+                }
+            },
+            "response": [
+                {
+                    "name": "Success Response",
+                    "body": {
+                        "status": "uploaded",
+                        "pdf_name": "E2.4.pdf", 
+                        "message": "Processing started in background."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Get Result by PDF Name",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/blueprints/result?pdf_name=E2.4.pdf",
+                    "host": ["{{base_url}}"],
+                    "path": ["blueprints", "result"],
+                    "query": [
+                        {
+                            "key": "pdf_name",
+                            "value": "E2.4.pdf"
+                        }
+                    ]
+                }
+            },
+            "response": [
+                {
+                    "name": "Complete Response",
+                    "body": {
+                        "pdf_name": "E2.4.pdf",
+                        "status": "complete",
+                        "result": {
+                            "A1": {"count": 12, "description": "2x4 LED Emergency Fixture"},
+                            "A1E": {"count": 5, "description": "Exit/Emergency Combo Unit"},
+                            "W": {"count": 9, "description": "Wall-Mounted Emergency LED"}
+                        }
+                    }
+                },
+                {
+                    "name": "In Progress Response", 
+                    "body": {
+                        "pdf_name": "E2.4.pdf",
+                        "status": "in_progress",
+                        "message": "Processing is still in progress. Please try again later."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/health",
+                    "host": ["{{base_url}}"],
+                    "path": ["health"]
+                }
+            }
+        },
+        {
+            "name": "List Processed PDFs",
+            "request": {
+                "method": "GET", 
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/blueprints/list",
+                    "host": ["{{base_url}}"],
+                    "path": ["blueprints", "list"]
+                }
+            }
+        },
+        {
+            "name": "Get Extracted Content",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/blueprints/content/E2.4.pdf",
+                    "host": ["{{base_url}}"],
+                    "path": ["blueprints", "content", "E2.4.pdf"]
+                }
+            }
+        }
+    ]
 }
