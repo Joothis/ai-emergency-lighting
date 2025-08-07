@@ -1,14 +1,10 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-celery[redis]==5.5.3
-redis==5.0.1
+celery[mongodb]==5.5.3
+pymongo==4.6.1
 
 # PDF and Image Processing
-PyMuPDF==1.23.8
-Pillow==10.1.0
-opencv-python==4.8.1.78
-numpy==1.24.3
-
+PyMuPDF==1.24.5
 # OCR
 easyocr==1.7.0
 
@@ -16,13 +12,12 @@ easyocr==1.7.0
 # google-generativeai # Removed as LLM calls are mocked
 
 # Table Extraction
-camelot-py[cv]==0.11.0
-pandas==2.2.2
+
 
 # Web framework extras
 python-multipart==0.0.6
 python-dotenv==1.0.0
-pydantic==2.5.0
+pydantic
 
 # Production
 gunicorn==21.2.0

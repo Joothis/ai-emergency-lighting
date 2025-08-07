@@ -4,11 +4,13 @@ from celery.result import AsyncResult
 from backend.worker import process_blueprint_task
 import os
 import shutil
-import sqlite3
+import pymongo
 import json
 import logging
 from datetime import datetime
 from typing import Optional
+
+from backend.storage import MongoStorage, FileStorage, Storage
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -31,48 +33,18 @@ app.add_middleware(
 
 # Configuration - Environment variables for production
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "output/uploads")
-DB_PATH = os.getenv("DB_PATH", "emergency_lighting.db")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+DB_NAME = os.getenv("DB_NAME", "emergency_lighting")
 
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Database setup
-def init_database():
-    """Initialize SQLite database for storing PDF processing results."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pdf_processing (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pdf_name TEXT UNIQUE NOT NULL,
-            status TEXT NOT NULL,
-            task_id TEXT,
-            result TEXT,  -- JSON string
-            rulebook TEXT,  -- JSON string  
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS extracted_content (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pdf_name TEXT NOT NULL,
-            content_type TEXT NOT NULL,  -- 'note' or 'table_row'
-            symbol TEXT,
-            description TEXT,
-            content TEXT,  -- Full extracted text
-            source_sheet TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (pdf_name) REFERENCES pdf_processing (pdf_name)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-
-# Initialize database on startup
-init_database()
+# Initialize storage based on MONGO_URL presence
+storage: Storage
+if MONGO_URL and MONGO_URL != "mongodb://localhost:27017/": # Check if MONGO_URL is explicitly set
+    storage = MongoStorage(MONGO_URL, DB_NAME)
+    if not storage.connect():
+        logger.warning("Could not connect to MongoDB. Falling back to file storage.")
+        storage = FileStorage(os.getenv("OUTPUT_DIR", "output"))
+else:
+    storage = FileStorage(os.getenv("OUTPUT_DIR", "output"))
 
 @app.get("/")
 async def root():
@@ -91,17 +63,17 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for monitoring."""
+    storage_status = "connected" if storage.connect() else "not_found"
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "database": "connected" if os.path.exists(DB_PATH) else "not_found"
+        "database": storage_status
     }
 
 @app.post("/blueprints/upload")
 async def upload_blueprint(file: UploadFile = File(...)):
     """
     Upload a PDF blueprint and initiate background processing.
-    Matches competition requirement exactly.
     """
     try:
         # Validate file
@@ -116,15 +88,12 @@ async def upload_blueprint(file: UploadFile = File(...)):
         # Start background processing
         task = process_blueprint_task.delay(file.filename)
         
-        # Store in database
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO pdf_processing (pdf_name, status, task_id, updated_at)
-            VALUES (?, ?, ?, ?)
-        ''', (file.filename, "processing", task.id, datetime.now()))
-        conn.commit()
-        conn.close()
+        # Store processing status
+        storage.update_pdf_processing_status(
+            pdf_name=file.filename,
+            status="processing",
+            task_id=task.id
+        )
         
         logger.info(f"Started processing {file.filename} with task ID: {task.id}")
         
@@ -142,28 +111,23 @@ async def upload_blueprint(file: UploadFile = File(...)):
 async def get_blueprint_result(pdf_name: str = Query(..., description="Name of the uploaded PDF")):
     """
     Retrieve processing result by PDF name.
-    Matches competition requirement exactly.
     """
     try:
-        # Query database for result
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT status, result, task_id FROM pdf_processing 
-            WHERE pdf_name = ?
-        ''', (pdf_name,))
-        
-        row = cursor.fetchone()
-        conn.close()
+        # Query storage for result
+        row = storage.get_pdf_processing_status(pdf_name)
         
         if not row:
             raise HTTPException(status_code=404, detail=f"PDF '{pdf_name}' not found")
         
-        status, result_json, task_id = row
+        status = row.get("status")
+        result_data = row.get("result")
+        task_id = row.get("task_id")
         
-        if status == "complete" and result_json:
+        if status == "complete" and result_data:
             # Return completed result
-            result_data = json.loads(result_json)
+            # result_data is already a dict if from FileStorage, string if from MongoStorage
+            if isinstance(result_data, str):
+                result_data = json.loads(result_data)
             return {
                 "pdf_name": pdf_name,
                 "status": "complete",
@@ -176,26 +140,21 @@ async def get_blueprint_result(pdf_name: str = Query(..., description="Name of t
                 task_result = AsyncResult(task_id)
                 if task_result.ready():
                     if task_result.successful():
-                        # Update database with completed result
-                        result_data = task_result.get()
+                        # Update storage with completed result
+                        full_result = task_result.get()
+                        storage.update_pdf_processing_status(
+                            pdf_name=pdf_name,
+                            status="complete",
+                            result=full_result
+                        )
                         
-                        conn = sqlite3.connect(DB_PATH)
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            UPDATE pdf_processing 
-                            SET status = ?, result = ?, updated_at = ?
-                            WHERE pdf_name = ?
-                        ''', ("complete", json.dumps(result_data), datetime.now(), pdf_name))
-                        conn.commit()
-                        conn.close()
-                        
-                        # Also store extracted content in database
-                        store_extracted_content(pdf_name, result_data)
+                        # Also store extracted content
+                        store_extracted_content(pdf_name, full_result)
                         
                         return {
                             "pdf_name": pdf_name,
                             "status": "complete", 
-                            "result": result_data.get("grouped_results", {})
+                            "result": full_result.get("grouped_results", {})
                         }
                     else:
                         return {
@@ -224,65 +183,32 @@ async def get_blueprint_result(pdf_name: str = Query(..., description="Name of t
         raise HTTPException(status_code=500, detail=str(e))
 
 def store_extracted_content(pdf_name: str, result_data: dict):
-    """Store extracted content in database as required by competition."""
+    """Store extracted content."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # Clear existing content for this PDF
-        cursor.execute('DELETE FROM extracted_content WHERE pdf_name = ?', (pdf_name,))
-        
-        # Store rulebook content
+        content_to_store = []
         rulebook = result_data.get("rulebook", {})
         for entry in rulebook.get("rulebook", {}).get("rulebook", []):
-            cursor.execute('''
-                INSERT INTO extracted_content 
-                (pdf_name, content_type, symbol, description, content, source_sheet)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                pdf_name,
-                entry.get("type"),
-                entry.get("symbol", ""),
-                entry.get("description", ""),
-                entry.get("text", entry.get("description", "")),
-                entry.get("source_sheet", "")
-            ))
-        
-        conn.commit()
-        conn.close()
+            content_to_store.append({
+                "type": entry.get("type"),
+                "symbol": entry.get("symbol", ""),
+                "description": entry.get("description", ""),
+                "content": entry.get("text", entry.get("description", "")),
+                "source_sheet": entry.get("source_sheet", ""),
+                "created_at": datetime.now().isoformat()
+            })
+        storage.store_extracted_content(pdf_name, content_to_store)
         
     except Exception as e:
         logger.error(f"Error storing extracted content: {e}")
 
 @app.get("/blueprints/content/{pdf_name}")
 async def get_extracted_content(pdf_name: str):
-    """Get all extracted content for a PDF from database."""
+    """Get all extracted content for a PDF."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT content_type, symbol, description, content, source_sheet, created_at
-            FROM extracted_content 
-            WHERE pdf_name = ?
-            ORDER BY created_at
-        ''', (pdf_name,))
+        content = storage.get_extracted_content(pdf_name)
         
-        rows = cursor.fetchall()
-        conn.close()
-        
-        if not rows:
+        if not content:
             raise HTTPException(status_code=404, detail=f"No content found for PDF '{pdf_name}'")
-        
-        content = []
-        for row in rows:
-            content.append({
-                "type": row[0],
-                "symbol": row[1],
-                "description": row[2], 
-                "content": row[3],
-                "source_sheet": row[4],
-                "created_at": row[5]
-            })
         
         return {
             "pdf_name": pdf_name,
@@ -300,25 +226,7 @@ async def get_extracted_content(pdf_name: str):
 async def list_processed_pdfs():
     """List all processed PDFs and their status."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT pdf_name, status, created_at, updated_at
-            FROM pdf_processing 
-            ORDER BY updated_at DESC
-        ''')
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        pdfs = []
-        for row in rows:
-            pdfs.append({
-                "pdf_name": row[0],
-                "status": row[1],
-                "created_at": row[2],
-                "updated_at": row[3]
-            })
+        pdfs = storage.list_processed_pdfs()
         
         return {
             "processed_pdfs": pdfs,

@@ -2,15 +2,18 @@ from celery import Celery
 import os
 import logging
 import fitz
-from backend.enhanced_competition_processor import CompetitionProcessor
+from backend.processor import BlueprintProcessor
 
 logger = logging.getLogger(__name__)
 
 # Configure Celery
+# Celery broker and backend can still use MongoDB even if application data is stored in files.
+# If MongoDB is not available, Celery will need an alternative broker/backend (e.g., Redis).
+# For this change, we assume MongoDB is still the intended Celery broker/backend.
 celery_app = Celery(
     "emergency_lighting_tasks",
-    broker=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-    backend=os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    broker=os.getenv("MONGO_URL", "mongodb://localhost:27017/emergency_lighting"),
+    backend=os.getenv("MONGO_URL", "mongodb://localhost:27017/emergency_lighting")
 )
 
 # Production-ready Celery configuration
@@ -33,9 +36,7 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "output")
 
 @celery_app.task(bind=True)
 def process_blueprint_task(self, pdf_name: str):
-    """
-    Enhanced processing task for competition requirements.
-    """
+    """Processes a PDF blueprint to detect emergency lighting fixtures and extract information."""
     try:
         # Update task state
         self.update_state(
@@ -51,7 +52,7 @@ def process_blueprint_task(self, pdf_name: str):
         logger.info(f"Processing {pdf_name}")
         
         # Initialize processor
-        processor = CompetitionProcessor()
+        processor = BlueprintProcessor()
         
         # Update progress
         self.update_state(
@@ -101,7 +102,7 @@ def process_blueprint_task(self, pdf_name: str):
             meta={'status': 'Finalizing results', 'progress': 95}
         )
         
-        # Prepare final result in competition format
+        # Prepare final result
         result = {
             "grouped_results": grouped_results,
             "rulebook": {

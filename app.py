@@ -9,35 +9,14 @@ import sys
 import time
 import os
 import signal
-import redis
 from pathlib import Path
 from dotenv import load_dotenv
+import importlib.util
 
 load_dotenv()
 
-def check_redis():
-    """Check if Redis is running"""
-    redis_url = os.getenv('REDIS_URL', "redis://localhost:6379/0")
-    try:
-        r = redis.from_url(redis_url)
-        return r.ping()
-    except Exception:
-        return False
-
-def start_redis():
-    """Start Redis server"""
-    redis_url = os.getenv('REDIS_URL', "redis://localhost:6379/0")
-    try:
-        r = redis.from_url(redis_url)
-        r.ping()
-        print("✅ Connected to Redis")
-        return True
-    except Exception as e:
-        print(f"❌ Redis connection failed: {e}")
-        print("Please ensure Redis is running and accessible at {redis_url}")
-        return False
-
-
+# NOTE: This script assumes MongoDB is already running as a separate service.
+# It only checks for connectivity to MongoDB.
 
 def start_celery():
     """Start Celery worker"""
@@ -87,17 +66,14 @@ def check_dependencies():
         'fastapi': 'FastAPI web framework',
         'uvicorn': 'ASGI server',
         'celery': 'Distributed task queue',
-        'redis': 'Redis client',
-        'PyMuPDF': 'PDF processing (requires Visual Studio Build Tools on Windows)',
-        'camelot': 'PDF table extraction (requires Poppler and Ghostscript)',
-        'pandas': 'Data manipulation library'
+        'pymongo': 'MongoDB client',
+        'easyocr': 'OCR library',
+        'google.generativeai': 'Google Gemini API'
     }
     missing_packages = []
     
     for package, description in required_packages.items():
-        try:
-            __import__(package.replace('-', '_').lower())
-        except ImportError:
+        if importlib.util.find_spec(package.replace('-', '_').lower()) is None:
             missing_packages.append(f"{package} ({description})")
     
     if missing_packages:
@@ -121,7 +97,9 @@ def create_directories():
         Path("output/images"),
         Path("output/results"),
         Path("output/visualizations"),
-        Path("output/annotations")
+        Path("output/annotations"),
+        Path("output/processing_status"), # For file storage
+        Path("output/extracted_content") # For file storage
     ]
     
     for directory in directories:
@@ -140,15 +118,6 @@ def main():
     
     # Create directories
     create_directories()
-    
-    # Check/Start Redis
-    if not check_redis():
-        print("Redis is not running. Attempting to start...")
-        if not start_redis():
-            print("Failed to connect to or start Redis. Please ensure Redis is running and accessible.")
-            sys.exit(1)
-    else:
-        print("[OK] Redis is already running")
     
     # Start services
     celery_process = start_celery()

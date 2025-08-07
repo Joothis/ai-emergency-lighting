@@ -1,137 +1,93 @@
-# Emergency Lighting Detection System - Competition Entry
+# AI Emergency Lighting Detection System
 
-AI Vision system for detecting emergency lighting fixtures from electrical construction blueprints.
+This project is an AI-powered vision system for detecting emergency lighting fixtures from electrical construction blueprints.
 
-## 🎯 Competition Features
+## Features
 
-- **Advanced Detection**: Specifically trained for 2'X4' recessed LED luminaires and wallpacks with photocells
-- **LLM Integration**: Uses Google Gemini for intelligent grouping and rulebook extraction  
-- **Database Storage**: Stores extracted content against PDF names as required
-- **Production Ready**: Deployed on Render.com with Redis backend
-- **Real-time Processing**: Background processing with status tracking
+- **Advanced Detection**: Trained to identify various emergency lighting fixtures.
+- **LLM Integration**: Utilizes Large Language Models for intelligent analysis of blueprints.
+- **Data Storage**: Stores extracted data for further analysis, using MongoDB by default or local file system as a fallback.
+- **Real-time Processing**: Employs background workers for efficient processing of blueprint files.
 
-## 🚀 Quick Demo
+## Local Development Setup
 
-**Live API**: https://your-app.onrender.com
-**API Docs**: https://your-app.onrender.com/docs
+### Prerequisites
 
-### Upload & Process
-```bash
-curl -X POST "https://your-app.onrender.com/blueprints/upload" \
-     -F "file=@blueprint.pdf"
-# Response: {"status": "uploaded", "pdf_name": "blueprint.pdf", "message": "Processing started in background."}
-```
+- Python 3.10+
+- MongoDB (optional, project will use local file storage if not available)
 
-### Get Results  
-```bash
-curl "https://your-app.onrender.com/blueprints/result?pdf_name=blueprint.pdf"
-# Response: {"pdf_name": "blueprint.pdf", "status": "complete", "result": {...}}
-```
+### Installation
 
-## 🔧 Local Development
-
-1. **Setup Environment**
+1. **Clone the repository:**
    ```bash
-   python scripts/setup_competition.py
+   git clone https://github.com/your-username/ai-emergency-lighting.git
+   cd ai-emergency-lighting
    ```
 
-2. **Google API Key Set**
-   Your Google API key has been set in the `.env` file.
-
-3. **Start Services**
+2. **Create a virtual environment:**
    ```bash
-   ./start_competition.sh
+   python -m venv venv
    ```
 
-## 📊 Detection Capabilities
+3. **Activate the virtual environment:**
 
-- **Emergency Lights**: Shaded rectangular areas with symbols (A1, A1E, etc.)
-- **2'X4' LED Fixtures**: Recessed luminaires with battery backup  
-- **Wallpack Fixtures**: Outdoor emergency lighting with photocells
-- **Exit Signs**: Combination exit/emergency units
-- **Symbol Association**: Links symbols with nearby text and specifications
+   - **Windows:**
+     ```bash
+     .\venv\Scripts\activate
+     ```
+   - **macOS/Linux:**
+     ```bash
+     source venv/bin/activate
+     ```
 
-## 🗄️ Database Schema
+4. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-**PDF Processing Table**:
-- pdf_name, status, task_id, result, created_at, updated_at
+5. **Set up environment variables:**
 
-**Extracted Content Table**: 
-- pdf_name, content_type, symbol, description, content, source_sheet
+   Create a `.env` file in the project root and add the following variables:
 
-## 📝 API Endpoints
+   ```
+   MONGO_URL=mongodb://localhost:27017/emergency_lighting # Optional: If not set or MongoDB is unavailable, local file storage will be used.
+   GOOGLE_API_KEY=your_google_api_key
+   UPLOAD_DIR=output/uploads
+   OUTPUT_DIR=output
+   ```
+
+### Running the Application
+
+1. **Start the FastAPI server:**
+   ```bash
+   uvicorn backend.main:app --reload
+   ```
+
+2. **Start the Celery worker:**
+   ```bash
+   celery -A backend.worker worker --loglevel=info --concurrency=1
+   ```
+
+The API will be available at `http://localhost:8000`.
+
+## API Endpoints
 
 | Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/blueprints/upload` | POST | Upload PDF and start processing |
-| `/blueprints/result?pdf_name=X` | GET | Get processing results |
-| `/blueprints/list` | GET | List all processed PDFs |
-| `/blueprints/content/{pdf_name}` | GET | Get extracted database content |
-| `/health` | GET | System health check |
+|---|---|---|
+| `/blueprints/upload` | POST | Upload a blueprint PDF for processing. |
+| `/blueprints/result` | GET | Get the processing results for a given PDF. |
+| `/blueprints/list` | GET | List all processed PDFs. |
+| `/health` | GET | Health check endpoint. |
 
-## 🎨 Example Output
-
-```json
-{
-  "pdf_name": "E2.4.pdf",
-  "status": "complete", 
-  "result": {
-    "A1": {"count": 12, "description": "2x4 LED Emergency Fixture"},
-    "A1E": {"count": 5, "description": "Exit/Emergency Combo Unit"}, 
-    "W": {"count": 9, "description": "Wall-Mounted Emergency LED"}
-  }
-}
-```
-
-## 🏗️ Architecture
+## Project Structure
 
 ```
-PDF Upload → FastAPI → Celery Worker → AI Processing → Database Storage
-                ↓           ↓              ↓
-            Redis Queue → CV Detection → Results API
-                        → OCR Extract
-                        → LLM Grouping
+.
+├── backend/         # FastAPI application, Celery worker, and storage logic
+├── models/          # Trained AI models
+├── output/          # Output files (uploads, images, results, processing status, extracted content)
+├── samples/         # Sample blueprint files
+├── app.py           # Main application startup script
+├── requirements.txt # Project dependencies
+└── README.md        # This file
 ```
-
-## 📦 Deployment (Render.com)
-
-1. **Push to GitHub**
-2. **Connect to Render**  
-3. **Use render.yaml config**
-4. **Set environment variables**
-5. **Deploy!**
-
-## 📸 Competition Deliverables
-
-1. ✅ **Screenshot**: `output/annotations/annotated_page_1.png`
-2. ✅ **Hosted API**: https://your-app.onrender.com
-3. ✅ **Postman Collection**: `postman/competition_collection.json`
-4. ✅ **GitHub Repo**: This repository
-5. ✅ **Demo Video**: [Link to 2-minute demo]
-
-## 🏆 Technical Highlights
-
-- **Multi-method Detection**: Combines shape detection, OCR, and pattern matching
-- **LLM Enhancement**: GPT-powered text extraction and intelligent grouping
-- **Production Scale**: Redis queuing, database persistence, error handling
-- **Competition Compliance**: Exact API specification matching
-- **Visual Validation**: Annotated images for verification
-
-## 🔍 Detection Process
-
-1. **PDF → Images**: High-resolution conversion (300 DPI)
-2. **Shape Detection**: Find shaded rectangles using multiple CV methods
-3. **OCR Analysis**: Extract text and associate with shapes
-4. **Symbol Matching**: Regex patterns for emergency lighting symbols
-5. **LLM Processing**: Intelligent grouping and description matching
-6. **Database Storage**: Persist all extracted content
-7. **Result Compilation**: Format for competition requirements
-
-## 📞 Support
-
-For questions about this competition entry:
-- **Email**: your.email@domain.com  
-- **Demo**: [YouTube/Loom link]
-- **Repository**: [GitHub link]
-
-Built with ❤️ for the AI Vision Competition
