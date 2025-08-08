@@ -70,18 +70,13 @@ class MongoStorage(Storage):
             upsert=True
         )
 
-    def store_extracted_content(self, pdf_name: str, content_data: List[Dict[str, Any]]):
+    def store_extracted_content(self, pdf_name: str, content_data: Dict[str, Any]):
         self.extracted_content_collection.delete_many({"pdf_name": pdf_name})
-        for entry in content_data:
-            self.extracted_content_collection.insert_one({
-                "pdf_name": pdf_name,
-                "content_type": entry.get("type"),
-                "symbol": entry.get("symbol", ""),
-                "description": entry.get("description", ""),
-                "content": entry.get("text", entry.get("description", "")),
-                "source_sheet": entry.get("source_sheet", ""),
-                "created_at": datetime.now().isoformat()
-            })
+        self.extracted_content_collection.insert_one({
+            "pdf_name": pdf_name,
+            "rulebook": content_data,
+            "created_at": datetime.now().isoformat()
+        })
 
     def get_extracted_content(self, pdf_name: str) -> List[Dict[str, Any]]:
         rows = self.extracted_content_collection.find({"pdf_name": pdf_name}).sort("created_at", pymongo.ASCENDING)

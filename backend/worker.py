@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 # For this change, we assume MongoDB is still the intended Celery broker/backend.
 celery_app = Celery(
     "emergency_lighting_tasks",
-    broker=os.getenv("MONGO_URL", "mongodb://localhost:27017/emergency_lighting"),
-    backend=os.getenv("MONGO_URL", "mongodb://localhost:27017/emergency_lighting")
+    broker=os.getenv("CELERY_BROKER_URL", "mongodb://localhost:27017/emergency_lighting"),
+    backend=os.getenv("CELERY_RESULT_BACKEND", "mongodb://localhost:27017/emergency_lighting")
 )
 
 # Production-ready Celery configuration
@@ -107,19 +107,10 @@ def process_blueprint_task(self, pdf_name: str):
             "grouped_results": grouped_results,
             "rulebook": {
                 "rulebook": [
-                    {
-                        "type": "note",
-                        "text": note["text"],
-                        "source_sheet": note.get("source", "Unknown")
-                    }
+                    dict(note, type="note")
                     for note in rulebook.get("notes", [])
                 ] + [
-                    {
-                        "type": "table_row",
-                        "symbol": entry["symbol"],
-                        "description": entry["description"],
-                        "source_sheet": "Lighting Schedule"
-                    }
+                    dict(entry, type="table_row")
                     for entry in rulebook.get("lighting_schedule", [])
                 ]
             },

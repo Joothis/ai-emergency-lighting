@@ -9,15 +9,21 @@ import logging
 from typing import List, Dict, Tuple, Any
 from dataclasses import dataclass
 import camelot
-import pandas as pd
+import torch
 import google.generativeai as genai
+from dotenv import load_dotenv
 
 from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
+# Load environment variables from .env file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+load_dotenv(dotenv_path=env_path)
+
 # Configure Google Gemini (you'll need to set API key)
-gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_api_key = os.getenv("GOOGLE_API_KEY")
+print(f"GEMINI_API_KEY: {gemini_api_key}")
 if not gemini_api_key:
     raise ValueError("GEMINI_API_KEY environment variable not set.")
 genai.configure(api_key=gemini_api_key)
@@ -77,44 +83,49 @@ class BlueprintProcessor:
 
     def detect_emergency_lights_enhanced(self, image_path: str, page_num: int) -> List[EmergencyLight]:
         """
-        Detects emergency lighting fixtures, including:
+        Detects emergency lighting fixtures using a pre-trained model, including:
         - 2' X 4' RECESSED LED LUMINAIRE
         - WALLPACK WITH BUILT IN PHOTOCELL
         """
         image = cv2.imread(image_path)
         if image is None:
             return []
-            
+
+        # Load the pre-trained model
+        model_path = os.path.join(os.getcwd(), "models", "detector.pt")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model not found at {model_path}")
+
+        model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path)
+
+        # Preprocess the image and perform inference
+        results = model(image)
+
+        # Process detections
         detections = []
-        
-        # Multiple detection methods
-        shaded_rectangles = self._detect_shaded_rectangles(image)
-        outlined_shapes = self._detect_outlined_shapes(image)
-        
-        # Get OCR results
-        ocr_results = self.reader.readtext(image_path)
-        
-        # Process all potential light locations
-        all_candidates = shaded_rectangles + outlined_shapes
-        
-        for bbox in all_candidates:
-            nearby_text, symbol = self._find_nearby_text_enhanced(bbox, ocr_results)
-            
-            if symbol or self._has_emergency_indicators(nearby_text):
+        for *xyxy, conf, cls in results.xyxy[0]:
+            if conf > 0.5:  # Confidence threshold
+                x1, y1, x2, y2 = map(int, xyxy)
+                bounding_box = [x1, y1, x2, y2]
+                
+                # Get nearby text using existing OCR method
+                ocr_results = self.reader.readtext(image_path)
+                nearby_text, symbol = self._find_nearby_text_enhanced(bounding_box, ocr_results)
+                
+                # Classify light type based on nearby text
                 light_type = self._classify_light_type(nearby_text)
-                confidence = self._calculate_confidence(bbox, symbol, nearby_text, light_type)
                 
                 detection = EmergencyLight(
                     symbol=symbol or "UNIDENTIFIED",
-                    bounding_box=bbox,
+                    bounding_box=bounding_box,
                     text_nearby=nearby_text,
                     source_sheet=f"Page {page_num}",
                     light_type=light_type,
-                    confidence=confidence
+                    confidence=float(conf)
                 )
                 detections.append(detection)
-        
-        # Filter and deduplicate
+
+        # Filter and deduplicate detections
         detections = self._filter_detections(detections)
         
         logger.info(f"Found {len(detections)} emergency lights on page {page_num}")
@@ -338,12 +349,12 @@ class BlueprintProcessor:
             model = genai.GenerativeModel('gemini-pro')
             prompt = f"""
 Extract the rulebook from the following text. The rulebook should include the lighting schedule, notes, and any special fixtures.
-If a lighting schedule is present, extract the 'SYMBOL' and 'DESCRIPTION' columns.
+If a lighting schedule is present, extract all columns, including 'SYMBOL', 'DESCRIPTION', 'MOUNT', 'VOLTAGE', 'LUMENS', etc.
 If general notes are present, extract them.
 If special fixtures are mentioned, extract their details.
 
 The output should be in JSON format with keys: "notes", "lighting_schedule", "special_fixtures".
-For "lighting_schedule", each item should have "symbol" and "description".
+For "lighting_schedule", each item should be a dictionary representing a row in the table.
 For "notes", each item should have "text" and "source_sheet".
 For "special_fixtures", provide a dictionary of fixture names and their descriptions.
 

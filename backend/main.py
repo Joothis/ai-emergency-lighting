@@ -1,7 +1,10 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from celery.result import AsyncResult
-from backend.worker import process_blueprint_task
+from worker import celery_app
+
+# Get the task from the Celery app
+process_blueprint_task = celery_app.signature('backend.worker.process_blueprint_task')
 import os
 import shutil
 import pymongo
@@ -9,8 +12,13 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional
+from dotenv import load_dotenv
 
 from backend.storage import MongoStorage, FileStorage, Storage
+
+# Load environment variables from .env file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+load_dotenv(dotenv_path=env_path)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -77,29 +85,30 @@ async def upload_blueprint(file: UploadFile = File(...)):
     """
     try:
         # Validate file
-        if not file.filename.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        filename = file.filename
+        if not filename or not filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Invalid filename or file type. Only PDF files are allowed.")
         
         # Save uploaded file
-        pdf_path = os.path.join(UPLOAD_DIR, file.filename)
+        pdf_path = os.path.join(UPLOAD_DIR, filename)
         with open(pdf_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
         # Start background processing
-        task = process_blueprint_task.delay(file.filename)
+        task = process_blueprint_task.delay(filename)
         
         # Store processing status
         storage.update_pdf_processing_status(
-            pdf_name=file.filename,
+            pdf_name=filename,
             status="processing",
             task_id=task.id
         )
         
-        logger.info(f"Started processing {file.filename} with task ID: {task.id}")
+        logger.info(f"Started processing {filename} with task ID: {task.id}")
         
         return {
             "status": "uploaded",
-            "pdf_name": file.filename,
+            "pdf_name": filename,
             "message": "Processing started in background."
         }
         
@@ -154,7 +163,7 @@ async def get_blueprint_result(pdf_name: str = Query(..., description="Name of t
                         return {
                             "pdf_name": pdf_name,
                             "status": "complete", 
-                            "result": full_result.get("grouped_results", {})
+                            "result": full_result.get("grouped_results", {}) 
                         }
                     else:
                         return {
@@ -182,27 +191,19 @@ async def get_blueprint_result(pdf_name: str = Query(..., description="Name of t
         logger.error(f"Result retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def store_extracted_content(pdf_name: str, result_data: dict):
-    """Store extracted content."""
+def store_extracted_content(pdf_name: str, result_data: Optional[dict]):
+    """Store extracted rulebook content."""
     try:
-        content_to_store = []
-        rulebook = result_data.get("rulebook", {})
-        for entry in rulebook.get("rulebook", {}).get("rulebook", []):
-            content_to_store.append({
-                "type": entry.get("type"),
-                "symbol": entry.get("symbol", ""),
-                "description": entry.get("description", ""),
-                "content": entry.get("text", entry.get("description", "")),
-                "source_sheet": entry.get("source_sheet", ""),
-                "created_at": datetime.now().isoformat()
-            })
-        storage.store_extracted_content(pdf_name, content_to_store)
+        if result_data:
+            rulebook = result_data.get("rulebook", {})
+            if rulebook:
+                storage.store_extracted_content(pdf_name, rulebook)
         
     except Exception as e:
         logger.error(f"Error storing extracted content: {e}")
 
-@app.get("/blueprints/content/{pdf_name}")
-async def get_extracted_content(pdf_name: str):
+@app.get("/blueprints/content")
+async def get_extracted_content_endpoint(pdf_name: str = Query(..., description="Name of the uploaded PDF")):
     """Get all extracted content for a PDF."""
     try:
         content = storage.get_extracted_content(pdf_name)
@@ -212,8 +213,7 @@ async def get_extracted_content(pdf_name: str):
         
         return {
             "pdf_name": pdf_name,
-            "extracted_content": content,
-            "total_entries": len(content)
+            "rulebook": content
         }
         
     except HTTPException:
